@@ -1,192 +1,177 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <title>Virtual Hand</title>
+const results =
+  handLandmarker.detectForVideo(
+    video,
+    performance.now()
+  );
 
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: black;
-    }
-
-    video {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 320px;
-      height: 240px;
-      opacity: 0.3;
-      z-index: 1;
-    }
-
-    canvas {
-      display: block;
-    }
-  </style>
-</head>
-<body>
-
-<video id="webcam" autoplay playsinline></video>
-
-<script type="module">
-
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.161/build/three.module.js";
-
-import {
-  HandLandmarker,
-  FilesetResolver
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
-
-
-// =======================
-// Three.js
-// =======================
-
-const scene = new THREE.Scene();
-
-const camera = new THREE.PerspectiveCamera(
-  70,
-  window.innerWidth / window.innerHeight,
-  0.01,
-  100
-);
-
-camera.position.z = 2;
-
-const renderer = new THREE.WebGLRenderer({
-  antialias: true
-});
-
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-
-// ライト
-const light = new THREE.DirectionalLight(0xffffff, 3);
-light.position.set(0, 1, 2);
-scene.add(light);
-
-
-// =======================
-// 両手分の点を作る
-// =======================
-
-const handPoints = [];
-
-for (let h = 0; h < 2; h++) {
-
-  const points = [];
-
-  for (let i = 0; i < 21; i++) {
-
-    const geo = new THREE.SphereGeometry(0.03);
-
-    const mat = new THREE.MeshStandardMaterial({
-      color: h === 0 ? 0x00ffff : 0xff00ff
-    });
-
-    const mesh = new THREE.Mesh(geo, mat);
-
-    scene.add(mesh);
-
-    points.push(mesh);
-  }
-
-  handPoints.push(points);
-}
-
-
-// =======================
-// Webcam
-// =======================
-
-const video = document.getElementById("webcam");
-
-const stream = await navigator.mediaDevices.getUserMedia({
-  video: true
-});
-
-video.srcObject = stream;
-
-
-// =======================
-// MediaPipe
-// =======================
-
-const vision = await FilesetResolver.forVisionTasks(
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
-);
-
-const handLandmarker =
-  await HandLandmarker.createFromOptions(
-    vision,
-    {
-      baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-      },
-
-      runningMode: "VIDEO",
-
-      // ← ここを2に変更
-      numHands: 2
-    }
+const poseResults =
+  poseLandmarker.detectForVideo(
+    video,
+    performance.now()
   );
 
 
-// =======================
-// Render Loop
-// =======================
+// =====================
+// 手が未検知なら全部消す
+// =====================
 
-let lastVideoTime = -1;
+if (
+  !results.landmarks ||
+  results.landmarks.length === 0
+) {
 
-async function render() {
+  handMeshes.forEach(hand => {
+    hand.forEach(mesh => {
+      mesh.visible = false;
+    });
+  });
 
-  if (video.readyState >= 2) {
+  wristLeftMeshes.forEach(m => {
+    m.visible = false;
+  });
 
-    if (lastVideoTime !== video.currentTime) {
+  wristRightMeshes.forEach(m => {
+    m.visible = false;
+  });
 
-      lastVideoTime = video.currentTime;
+} else {
 
-      const results =
-        handLandmarker.detectForVideo(
-          video,
-          performance.now()
+  // =====================
+  // 手更新
+  // =====================
+
+  results.landmarks.forEach(
+    (lm, handIndex) => {
+
+      // ----- 通常landmark -----
+
+      lm.forEach((p, i) => {
+
+        const mesh =
+          handMeshes[handIndex][i];
+
+        mesh.position.set(
+          -(p.x - 0.5) * 2,
+          -(p.y - 0.5) * 2,
+          p.z
         );
 
-      // 検知された手を全部処理
-      for (let h = 0; h < results.landmarks.length; h++) {
+        mesh.visible = true;
+      });
 
-        const landmarks = results.landmarks[h];
+      // =====================
+      // 手首左右補間
+      // =====================
 
-        for (let i = 0; i < landmarks.length; i++) {
+      const wrist = lm[0];
+      const indexBase = lm[5];
+      const pinkyBase = lm[17];
 
-          const p = landmarks[i];
+      const vx =
+        pinkyBase.x - indexBase.x;
 
-          // 左右反転修正
-          const x = -(p.x - 0.5) * 2;
-          const y = -(p.y - 0.5) * 2;
-          const z = -p.z;
+      const vy =
+        pinkyBase.y - indexBase.y;
 
-          handPoints[h][i].position.set(
-            x,
-            y,
-            z
-          );
-        }
-      }
+      const scale = 0.35;
+
+      const wristLeft = {
+        x: wrist.x - vx * scale,
+        y: wrist.y - vy * scale,
+        z: wrist.z
+      };
+
+      const wristRight = {
+        x: wrist.x + vx * scale,
+        y: wrist.y + vy * scale,
+        z: wrist.z
+      };
+
+      // 左端
+
+      wristLeftMeshes[
+        handIndex
+      ].position.set(
+        -(wristLeft.x - 0.5) * 2,
+        -(wristLeft.y - 0.5) * 2,
+        wristLeft.z
+      );
+
+      // 右端
+
+      wristRightMeshes[
+        handIndex
+      ].position.set(
+        -(wristRight.x - 0.5) * 2,
+        -(wristRight.y - 0.5) * 2,
+        wristRight.z
+      );
+
+      wristLeftMeshes[
+        handIndex
+      ].visible = true;
+
+      wristRightMeshes[
+        handIndex
+      ].visible = true;
     }
+  );
+
+  // =====================
+  // 未検知側を消す
+  // =====================
+
+  for (
+    let i = results.landmarks.length;
+    i < 2;
+    i++
+  ) {
+
+    handMeshes[i].forEach(mesh => {
+      mesh.visible = false;
+    });
+
+    wristLeftMeshes[i].visible =
+      false;
+
+    wristRightMeshes[i].visible =
+      false;
   }
-
-  renderer.render(scene, camera);
-
-  requestAnimationFrame(render);
 }
 
-render();
 
-</script>
-</body>
-</html>
+// =====================
+// 肘
+// =====================
+
+if (
+  poseResults.landmarks &&
+  poseResults.landmarks.length > 0
+) {
+
+  const pose =
+    poseResults.landmarks[0];
+
+  const leftElbow = pose[13];
+  const rightElbow = pose[14];
+
+  leftElbowMesh.position.set(
+    -(leftElbow.x - 0.5) * 2,
+    -(leftElbow.y - 0.5) * 2,
+    leftElbow.z
+  );
+
+  rightElbowMesh.position.set(
+    -(rightElbow.x - 0.5) * 2,
+    -(rightElbow.y - 0.5) * 2,
+    rightElbow.z
+  );
+
+  leftElbowMesh.visible = true;
+  rightElbowMesh.visible = true;
+
+} else {
+
+  leftElbowMesh.visible = false;
+  rightElbowMesh.visible = false;
+}
