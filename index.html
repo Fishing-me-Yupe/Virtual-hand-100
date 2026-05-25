@@ -1,177 +1,638 @@
-const results =
-  handLandmarker.detectForVideo(
-    video,
-    performance.now()
-  );
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Finger Texture Hand</title>
 
-const poseResults =
-  poseLandmarker.detectForVideo(
-    video,
-    performance.now()
-  );
+<style>
+
+body{
+  margin:0;
+  overflow:hidden;
+  background:black;
+}
+
+video{
+  position:absolute;
+  left:0;
+  top:0;
+  width:320px;
+  opacity:0.3;
+  z-index:1;
+}
+
+</style>
+</head>
+<body>
+
+<video id="webcam" autoplay playsinline></video>
+
+<script type="module">
+
+import * as THREE from
+"https://cdn.jsdelivr.net/npm/three@0.161/build/three.module.js";
+
+import {
+  HandLandmarker,
+  FilesetResolver
+} from
+"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
 
-// =====================
-// 手が未検知なら全部消す
-// =====================
 
-if (
-  !results.landmarks ||
-  results.landmarks.length === 0
-) {
+// =======================
+// Three.js
+// =======================
 
-  handMeshes.forEach(hand => {
-    hand.forEach(mesh => {
-      mesh.visible = false;
-    });
-  });
+const scene =
+new THREE.Scene();
 
-  wristLeftMeshes.forEach(m => {
-    m.visible = false;
-  });
+const camera =
+new THREE.PerspectiveCamera(
 
-  wristRightMeshes.forEach(m => {
-    m.visible = false;
-  });
+  70,
 
-} else {
+  window.innerWidth /
+  window.innerHeight,
 
-  // =====================
-  // 手更新
-  // =====================
+  0.01,
+  100
+);
 
-  results.landmarks.forEach(
-    (lm, handIndex) => {
+camera.position.z = 2;
 
-      // ----- 通常landmark -----
 
-      lm.forEach((p, i) => {
+const renderer =
+new THREE.WebGLRenderer({
 
-        const mesh =
-          handMeshes[handIndex][i];
+  antialias:true
 
-        mesh.position.set(
-          -(p.x - 0.5) * 2,
-          -(p.y - 0.5) * 2,
-          p.z
-        );
+});
 
-        mesh.visible = true;
+renderer.setSize(
+
+  window.innerWidth,
+  window.innerHeight
+
+);
+
+document.body.appendChild(
+  renderer.domElement
+);
+
+
+
+// =======================
+// Light
+// =======================
+
+const light =
+new THREE.DirectionalLight(
+  0xffffff,
+  3
+);
+
+light.position.set(0,1,2);
+
+scene.add(light);
+
+
+
+// =======================
+// Texture
+// =======================
+
+const textureLoader =
+new THREE.TextureLoader();
+
+const topFingerTexture =
+textureLoader.load(
+  "./top-finger.svg"
+);
+
+const middleFingerTexture =
+textureLoader.load(
+  "./middle-finger.svg"
+);
+
+
+
+// =======================
+// Finger Meshes
+// =======================
+
+const fingerMeshes = [];
+
+
+/*
+
+0 thumb
+1 index
+2 middle
+3 ring
+4 pinky
+
+0 mcp-pip
+1 pip-dip
+2 dip-tip
+
+*/
+
+
+for(let h=0; h<2; h++){
+
+  const hand = [];
+
+  for(let f=0; f<5; f++){
+
+    const finger = [];
+
+    for(let s=0; s<3; s++){
+
+      const geometry =
+      new THREE.PlaneGeometry(
+        1,
+        1
+      );
+
+      const material =
+      new THREE.MeshBasicMaterial({
+
+        map:
+        s === 2
+        ? topFingerTexture
+        : middleFingerTexture,
+
+        transparent:true,
+
+        side:THREE.DoubleSide
       });
 
-      // =====================
-      // 手首左右補間
-      // =====================
-
-      const wrist = lm[0];
-      const indexBase = lm[5];
-      const pinkyBase = lm[17];
-
-      const vx =
-        pinkyBase.x - indexBase.x;
-
-      const vy =
-        pinkyBase.y - indexBase.y;
-
-      const scale = 0.35;
-
-      const wristLeft = {
-        x: wrist.x - vx * scale,
-        y: wrist.y - vy * scale,
-        z: wrist.z
-      };
-
-      const wristRight = {
-        x: wrist.x + vx * scale,
-        y: wrist.y + vy * scale,
-        z: wrist.z
-      };
-
-      // 左端
-
-      wristLeftMeshes[
-        handIndex
-      ].position.set(
-        -(wristLeft.x - 0.5) * 2,
-        -(wristLeft.y - 0.5) * 2,
-        wristLeft.z
+      const mesh =
+      new THREE.Mesh(
+        geometry,
+        material
       );
 
-      // 右端
-
-      wristRightMeshes[
-        handIndex
-      ].position.set(
-        -(wristRight.x - 0.5) * 2,
-        -(wristRight.y - 0.5) * 2,
-        wristRight.z
-      );
-
-      wristLeftMeshes[
-        handIndex
-      ].visible = true;
-
-      wristRightMeshes[
-        handIndex
-      ].visible = true;
-    }
-  );
-
-  // =====================
-  // 未検知側を消す
-  // =====================
-
-  for (
-    let i = results.landmarks.length;
-    i < 2;
-    i++
-  ) {
-
-    handMeshes[i].forEach(mesh => {
       mesh.visible = false;
-    });
 
-    wristLeftMeshes[i].visible =
-      false;
+      scene.add(mesh);
 
-    wristRightMeshes[i].visible =
-      false;
+      finger.push(mesh);
+    }
+
+    hand.push(finger);
   }
+
+  fingerMeshes.push(hand);
 }
 
 
-// =====================
-// 肘
-// =====================
 
-if (
-  poseResults.landmarks &&
-  poseResults.landmarks.length > 0
-) {
+// =======================
+// Palm Lines
+// =======================
 
-  const pose =
-    poseResults.landmarks[0];
+const palmLines = [];
 
-  const leftElbow = pose[13];
-  const rightElbow = pose[14];
+for(let h=0; h<2; h++){
 
-  leftElbowMesh.position.set(
-    -(leftElbow.x - 0.5) * 2,
-    -(leftElbow.y - 0.5) * 2,
-    leftElbow.z
+  const geometry =
+  new THREE.BufferGeometry();
+
+  const material =
+  new THREE.LineBasicMaterial({
+
+    color:0xffb395
+
+  });
+
+  const line =
+  new THREE.LineLoop(
+    geometry,
+    material
   );
 
-  rightElbowMesh.position.set(
-    -(rightElbow.x - 0.5) * 2,
-    -(rightElbow.y - 0.5) * 2,
-    rightElbow.z
-  );
+  line.visible = false;
 
-  leftElbowMesh.visible = true;
-  rightElbowMesh.visible = true;
+  scene.add(line);
 
-} else {
-
-  leftElbowMesh.visible = false;
-  rightElbowMesh.visible = false;
+  palmLines.push(line);
 }
+
+
+
+// =======================
+// Palm Fill
+// =======================
+
+const palmMeshes = [];
+
+for(let h=0; h<2; h++){
+
+  const geometry =
+  new THREE.BufferGeometry();
+
+  const material =
+  new THREE.MeshBasicMaterial({
+
+    color:0xffd6c6,
+
+    side:THREE.DoubleSide,
+
+    transparent:true,
+
+    opacity:1
+  });
+
+  const mesh =
+  new THREE.Mesh(
+    geometry,
+    material
+  );
+
+  mesh.visible = false;
+
+  scene.add(mesh);
+
+  palmMeshes.push(mesh);
+}
+
+
+
+// =======================
+// Finger Connections
+// =======================
+
+const fingerConnections = [
+
+  // thumb
+  [[1,2],[2,3],[3,4]],
+
+  // index
+  [[5,6],[6,7],[7,8]],
+
+  // middle
+  [[9,10],[10,11],[11,12]],
+
+  // ring
+  [[13,14],[14,15],[15,16]],
+
+  // pinky
+  [[17,18],[18,19],[19,20]]
+
+];
+
+
+
+// =======================
+// Webcam
+// =======================
+
+const video =
+document.getElementById(
+  "webcam"
+);
+
+const stream =
+await navigator
+.mediaDevices
+.getUserMedia({
+
+  video:true
+
+});
+
+video.srcObject = stream;
+
+
+
+// =======================
+// MediaPipe
+// =======================
+
+const vision =
+await FilesetResolver
+.forVisionTasks(
+
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+
+);
+
+const handLandmarker =
+await HandLandmarker
+.createFromOptions(
+
+  vision,
+
+  {
+
+    baseOptions:{
+
+      modelAssetPath:
+
+      "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+    },
+
+    runningMode:"VIDEO",
+
+    numHands:2
+  }
+);
+
+
+
+// =======================
+// Utility
+// =======================
+
+function toScenePosition(p){
+
+  return new THREE.Vector3(
+
+    -(p.x - 0.5) * 2,
+
+    -(p.y - 0.5) * 2,
+
+    -p.z
+  );
+}
+
+
+
+// =======================
+// Render
+// =======================
+
+let lastVideoTime = -1;
+
+async function render(){
+
+  if(video.readyState >= 2){
+
+    if(lastVideoTime !==
+       video.currentTime){
+
+      lastVideoTime =
+      video.currentTime;
+
+      const results =
+      handLandmarker
+      .detectForVideo(
+
+        video,
+
+        performance.now()
+      );
+
+
+
+      // =======================
+      // 全非表示
+      // =======================
+
+      for(let h=0; h<2; h++){
+
+        palmLines[h]
+        .visible = false;
+
+        palmMeshes[h]
+        .visible = false;
+
+        for(let f=0; f<5; f++){
+
+          for(let s=0; s<3; s++){
+
+            fingerMeshes[h][f][s]
+            .visible = false;
+          }
+        }
+      }
+
+
+
+      // =======================
+      // 手描画
+      // =======================
+
+      for(let h=0;
+          h<results.landmarks.length;
+          h++){
+
+        const landmarks =
+        results.landmarks[h];
+
+
+
+        // ===================
+        // 指
+        // ===================
+
+        for(let f=0; f<5; f++){
+
+          for(let s=0; s<3; s++){
+
+            const ids =
+            fingerConnections[f][s];
+
+            const a =
+            toScenePosition(
+              landmarks[ids[0]]
+            );
+
+            const b =
+            toScenePosition(
+              landmarks[ids[1]]
+            );
+
+            const mesh =
+            fingerMeshes[h][f][s];
+
+
+
+            // 中点
+
+            const mid =
+            new THREE.Vector3(
+              (a.x+b.x)/2,
+              (a.y+b.y)/2,
+              (a.z+b.z)/2
+            );
+
+            mesh.position.copy(mid);
+
+
+
+            // 長さ
+
+            const length =
+            a.distanceTo(b);
+
+
+
+            // 回転
+
+            const angle =
+            Math.atan2(
+
+              b.y-a.y,
+              b.x-a.x
+            );
+
+            mesh.rotation.z =
+            angle;
+
+
+
+            // 太さ固定気味
+
+            const thickness =
+            Math.max(
+              length * 0.42,
+              0.06
+            );
+
+
+
+            // 長さ方向だけ伸縮
+
+            mesh.scale.set(
+              length,
+              thickness,
+              1
+            );
+
+
+
+            mesh.visible = true;
+          }
+        }
+
+
+
+        // ===================
+        // 手のひら線
+        // ===================
+
+        const outlineIds = [
+
+          17,
+          13,
+          9,
+          5,
+          1,
+          0
+
+        ];
+
+        const outlinePoints = [];
+
+        for(let i=0;
+            i<outlineIds.length;
+            i++){
+
+          outlinePoints.push(
+
+            toScenePosition(
+              landmarks[
+                outlineIds[i]
+              ]
+            )
+          );
+        }
+
+        palmLines[h]
+        .geometry
+        .setFromPoints(
+          outlinePoints
+        );
+
+        palmLines[h]
+        .visible = true;
+
+
+
+        // ===================
+        // 手のひら塗り
+        // ===================
+
+        const fillIds = [
+
+          0,
+          5,
+          9,
+
+          0,
+          9,
+          13,
+
+          0,
+          13,
+          17
+
+        ];
+
+        const vertices = [];
+
+        for(let i=0;
+            i<fillIds.length;
+            i++){
+
+          const p =
+          toScenePosition(
+
+            landmarks[
+              fillIds[i]
+            ]
+          );
+
+          vertices.push(
+            p.x,
+            p.y,
+            p.z
+          );
+        }
+
+        const geometry =
+        new THREE.BufferGeometry();
+
+        geometry.setAttribute(
+
+          "position",
+
+          new THREE.Float32BufferAttribute(
+            vertices,
+            3
+          )
+        );
+
+        geometry.computeVertexNormals();
+
+        palmMeshes[h]
+        .geometry.dispose();
+
+        palmMeshes[h]
+        .geometry =
+        geometry;
+
+        palmMeshes[h]
+        .visible = true;
+      }
+    }
+  }
+
+  renderer.render(
+    scene,
+    camera
+  );
+
+  requestAnimationFrame(
+    render
+  );
+}
+
+render();
+
+</script>
+</body>
+</html>
