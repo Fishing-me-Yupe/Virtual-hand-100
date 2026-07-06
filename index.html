@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Virtual Hand</title>
+  <title>Virtual Hand - Line & Fill</title>
 
   <style>
     body {
@@ -39,9 +39,18 @@ import {
   FilesetResolver
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
+// ==========================================
+// ★ 自由に変更できる設定（カスタマイズ枠）
+// ==========================================
+const CONFIG = {
+  lineColor: 0x33ff57, // #あいうえおか（例：鮮やかな緑。0xの後に16進数）
+  lineWidth: 0.015,    // 太さX（3D空間上の線の太さ。シリンダーの半径などに応用）
+  fillColor: 0x33ff57, // 塗りつぶしの色（線と同じ色）
+  fillOpacity: 0.4     // 塗りつぶしの透明度（0.0=透明 〜 1.0=不透明）
+};
 
 // =======================
-// Three.js
+// Three.js セットアップ
 // =======================
 
 const scene = new THREE.Scene();
@@ -52,43 +61,81 @@ const camera = new THREE.PerspectiveCamera(
   0.01,
   100
 );
-
 camera.position.z = 2;
 
-const renderer = new THREE.WebGLRenderer({
-  antialias: true
-});
-
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
+// ライト（両面きれいに照らすために環境光と平行光を追加）
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+scene.add(ambientLight);
 
-// ライト
-const light = new THREE.DirectionalLight(0xffffff, 3);
+const light = new THREE.DirectionalLight(0xffffff, 2);
 light.position.set(0, 1, 2);
 scene.add(light);
 
 
-// =======================
-// 手の点を作る
-// =======================
+// ==========================================
+// 骨格の線（チューブ）と 手のひらの面（メッシュ）の準備
+// ==========================================
 
-const handPoints = [];
+// 指の接続パターン（MediaPipeのランドマークID順）
+// 0: 手首, 1〜4: 親指, 5〜8: 人差し指, 9〜12: 中指, 13〜16: 薬指, 17〜20: 小指
+const connections = [
+  // 親指
+  [1, 2], [2, 3], [3, 4],
+  // 人差し指
+  [5, 6], [6, 7], [7, 8],
+  // 中指
+  [9, 10], [10, 11], [11, 12],
+  // 薬指
+  [13, 14], [14, 15], [15, 16],
+  // 小指
+  [17, 18], [18, 19], [19, 20],
+  // 手首から各指の甲の付け根への接続
+  [0, 2],  // 手首 -> 親指第二関節(ID:2)
+  [0, 5],  // 手首 -> 人差し指第三関節(ID:5)
+  [0, 9],  // 手首 -> 中指第三関節(ID:9)
+  [0, 13], // 手首 -> 薬指第三関節(ID:13)
+  [0, 17]  // 手首 -> 小指第三関節(ID:17)
+];
 
-for (let i = 0; i < 21; i++) {
+// 太さを持たせるために、線の代わりにシリンダー（チューブ）を生成して保持する配列
+const lineMeshes = [];
+const lineMaterial = new THREE.MeshStandardMaterial({ color: CONFIG.lineColor });
 
-  const geo = new THREE.SphereGeometry(0.03);
-
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x00ffff
-  });
-
-  const mesh = new THREE.Mesh(geo, mat);
-
+connections.forEach(() => {
+  // 初期状態では中身のないダミーのシリンダーを作成
+  const geom = new THREE.CylinderGeometry(CONFIG.lineWidth, CONFIG.lineWidth, 1, 8);
+  const mesh = new THREE.Mesh(geom, lineMaterial);
   scene.add(mesh);
+  lineMeshes.push(mesh);
+});
 
-  handPoints.push(mesh);
-}
+// 手のひらを塗りつぶすためのポリゴン（面）の定義
+// 頂点順：手首(0) -> 親指(2) -> 人差し指(5) -> 中指(9) -> 薬指(13) -> 小指(17)
+const handPalmGeometry = new THREE.BufferGeometry();
+// インデックス（三角形の組み合わせで多角形を作る設定）
+const indices = [
+  0, 2, 5,  // 三角形1
+  0, 5, 9,  // 三角形2
+  0, 9, 13, // 三角形3
+  0, 13, 17 // 三角形4
+];
+handPalmGeometry.setIndex(indices);
+
+const handPalmMaterial = new THREE.MeshStandardMaterial({
+  color: CONFIG.fillColor,
+  side: THREE.DoubleSide, // 裏表両方描画する
+  transparent: true,
+  opacity: CONFIG.fillOpacity
+});
+const handPalmMesh = new THREE.Mesh(handPalmGeometry, handPalmMaterial);
+scene.add(handPalmMesh);
+
+
+// 21個の検知した点は、今回は描画しない（非表示）のでSphereの作成自体をカットしました。
 
 
 // =======================
@@ -96,11 +143,7 @@ for (let i = 0; i < 21; i++) {
 // =======================
 
 const video = document.getElementById("webcam");
-
-const stream = await navigator.mediaDevices.getUserMedia({
-  video: true
-});
-
+const stream = await navigator.mediaDevices.getUserMedia({ video: true });
 video.srcObject = stream;
 
 
@@ -112,20 +155,33 @@ const vision = await FilesetResolver.forVisionTasks(
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
 );
 
-const handLandmarker =
-  await HandLandmarker.createFromOptions(
-    vision,
-    {
-      baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-      },
+const handLandmarker = await HandLandmarker.createFromOptions(
+  vision,
+  {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+    },
+    runningMode: "VIDEO",
+    numHands: 1
+  }
+);
 
-      runningMode: "VIDEO",
 
-      numHands: 1
-    }
-  );
+// =======================
+// シリンダーを2点間に配置する関数（太さを持った線を描くため）
+// =======================
+function updateCylinderLine(mesh, p1, p2) {
+  const direction = new THREE.Vector3().subVectors(p2, p1);
+  const length = direction.length();
+  
+  // 位置の更新（2点の中間）
+  mesh.position.copy(p1).add(direction.multiplyScalar(0.5));
+  
+  // 向きの更新
+  mesh.scale.set(1, length, 1);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+  mesh.visible = true;
+}
 
 
 // =======================
@@ -133,47 +189,59 @@ const handLandmarker =
 // =======================
 
 let lastVideoTime = -1;
+// 一時保存用のVector3配列（21点分）
+const points = Array.from({ length: 21 }, () => new THREE.Vector3());
 
 async function render() {
 
   if (video.readyState >= 2) {
-
     if (lastVideoTime !== video.currentTime) {
-
       lastVideoTime = video.currentTime;
 
-      const results =
-        handLandmarker.detectForVideo(
-          video,
-          performance.now()
-        );
+      const results = handLandmarker.detectForVideo(video, performance.now());
+
+      // 全ての線と面を一旦非表示にリセット
+      lineMeshes.forEach(m => m.visible = false);
+      handPalmMesh.visible = false;
 
       // 手が見つかった
       if (results.landmarks.length > 0) {
-
         const landmarks = results.landmarks[0];
 
+        // 1. 座標を変換してVector3配列に格納
         for (let i = 0; i < landmarks.length; i++) {
-
           const p = landmarks[i];
-
-          // 座標変換
-          const x = (p.x - 0.5) * 2;
-          const y = -(p.y - 0.5) * 2;
-          const z = -p.z;
-
-          handPoints[i].position.set(
-            x,
-            y,
-            z
+          points[i].set(
+            (p.x - 0.5) * 2,
+            -(p.y - 0.5) * 2,
+            -p.z * 2 // Zの立体感を出すため少し強調
           );
         }
+
+        // 2. 指定された2点間を太い線（シリンダー）で結ぶ
+        connections.forEach((conn, index) => {
+          updateCylinderLine(lineMeshes[index], points[conn[0]], points[conn[1]]);
+        });
+
+        // 3. 手のひらの塗りつぶし面を更新
+        const palmVertices = new Float32Array([
+          points[0].x,  points[0].y,  points[0].z,  // 手首
+          points[2].x,  points[2].y,  points[2].z,  // 親指
+          points[5].x,  points[5].y,  points[5].z,  // 人差し指
+          points[9].x,  points[9].y,  points[9].z,  // 中指
+          points[13].x, points[13].y, points[13].z, // 薬指
+          points[17].x, points[17].y, points[17].z  // 小指
+        ]);
+        
+        handPalmGeometry.setAttribute('position', new THREE.BufferAttribute(palmVertices, 3));
+        handPalmGeometry.computeVertexNormals(); // ライトが綺麗に当たるように法線計算
+        handPalmGeometry.attributes.position.needsUpdate = true;
+        handPalmMesh.visible = true;
       }
     }
   }
 
   renderer.render(scene, camera);
-
   requestAnimationFrame(render);
 }
 
