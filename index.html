@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Virtual Hand - Both Hands, Line & Fill</title>
+  <title>Virtual Hand - Joint Palm & Realtime Config</title>
 
   <style>
     body {
@@ -40,13 +40,13 @@ import {
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
 // ==========================================
-// ★ 自由に変更できる設定（カスタマイズ枠）
+// ★ ここを書き換えると、色や太さがリアルタイムに変わります！
 // ==========================================
 const CONFIG = {
-  lineColor: 0x33ff57, // #あいうえおか（例：鮮やかな緑。0xの後に16進数）
-  lineWidth: 0.015,    // 太さX（3D空間上の線の太さ）
-  fillColor: 0x33ff57, // 塗りつぶしの色
-  fillOpacity: 0.4     // 塗りつぶしの透明度（0.0=透明 〜 1.0=不透明）
+  lineColor: 0x33ff57, // 線（骨格）の色（#あいうえおか の代わりに 0xあいうえおか）
+  lineWidth: 0.015,    // 太さX（数値を大きくすると太くなります）
+  fillColor: 0x33ff57, // 手のひら塗りつぶしの色
+  fillOpacity: 0.4     // 塗りつぶしの透明度（0.0:透明 〜 1.0:べた塗り）
 };
 
 // =======================
@@ -77,63 +77,65 @@ scene.add(light);
 
 
 // ==========================================
-// 接続パターンとメッシュの準備（両手分）
+// 骨格の接続定義
 // ==========================================
 
 const connections = [
-  // 親指
-  [1, 2], [2, 3], [3, 4],
-  // 人差し指
-  [5, 6], [6, 7], [7, 8],
-  // 中指
-  [9, 10], [10, 11], [11, 12],
-  // 薬指
-  [13, 14], [14, 15], [15, 16],
-  // 小指
-  [17, 18], [18, 19], [19, 20],
-  // 手首から各指の甲の付け根への接続
-  [0, 2],  // 手首 -> 親指第二関節
-  [0, 5],  // 手首 -> 人差し指第三関節
-  [0, 9],  // 手首 -> 中指第三関節
-  [0, 13], // 手首 -> 薬指第三関節
-  [0, 17]  // 手首 -> 小指第三関節
+  // 各指の第一〜第三（第四）関節の接続
+  [1, 2], [2, 3], [3, 4],       // 親指
+  [5, 6], [6, 7], [7, 8],       // 人差し指
+  [9, 10], [10, 11], [11, 12],  // 中指
+  [13, 14], [14, 15], [15, 16], // 薬指
+  [17, 18], [18, 19], [19, 20], // 小指
+  
+  // 手首から各指の付け根への接続（骨格線）
+  [0, 1], [0, 5], [0, 9], [0, 13], [0, 17]
 ];
 
-const lineMaterial = new THREE.MeshStandardMaterial({ color: CONFIG.lineColor });
-const handPalmMaterial = new THREE.MeshStandardMaterial({
-  color: CONFIG.fillColor,
-  side: THREE.DoubleSide,
-  transparent: true,
-  opacity: CONFIG.fillOpacity
-});
-
-// 手のひらを塗りつぶすポリゴン用のインデックス
-const indices = [0, 2, 5, 0, 5, 9, 0, 9, 13, 0, 13, 17];
+// 画像のイメージ通り、手のひらの外周を囲って塗りつぶすためのインデックス（三角形の組み合わせ）
+// 頂点：0:手首, 1:親指付け根, 5:人差し指付け根, 9:中指付け根, 13:薬指付け根, 17:小指付け根
+const palmIndices = [
+  0, 1, 5,   // 手首 - 親指 - 人差し指
+  0, 5, 9,   // 手首 - 人差し指 - 中指
+  0, 9, 13,  // 手首 - 中指 - 薬指
+  0, 13, 17  // 手首 - 薬指 - 小指
+];
 
 
-// 片手分のメッシュ群を生成する関数
-function createHandMeshes() {
+// 片手分の3Dオブジェクトを生成する共通関数
+function createHandObjects() {
   const lineMeshes = [];
+  
+  // 各線（シリンダー）の生成
   connections.forEach(() => {
+    // 最初の太さはCONFIGから取得（あとで毎フレーム更新します）
     const geom = new THREE.CylinderGeometry(CONFIG.lineWidth, CONFIG.lineWidth, 1, 8);
-    const mesh = new THREE.Mesh(geom, lineMaterial);
+    const mat = new THREE.MeshStandardMaterial({ color: CONFIG.lineColor });
+    const mesh = new THREE.Mesh(geom, mat);
     scene.add(mesh);
     lineMeshes.push(mesh);
   });
 
-  const handPalmGeometry = new THREE.BufferGeometry();
-  handPalmGeometry.setIndex(indices);
-  const handPalmMesh = new THREE.Mesh(handPalmGeometry, handPalmMaterial);
-  scene.add(handPalmMesh);
+  // 手のひら塗りつぶし面の生成
+  const palmGeometry = new THREE.BufferGeometry();
+  palmGeometry.setIndex(palmIndices);
+  const palmMaterial = new THREE.MeshStandardMaterial({
+    color: CONFIG.fillColor,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: CONFIG.fillOpacity
+  });
+  const palmMesh = new THREE.Mesh(palmGeometry, palmMaterial);
+  scene.add(palmMesh);
 
-  // 21点分のVector3配列
+  // 関節21点分の座標保存用
   const points = Array.from({ length: 21 }, () => new THREE.Vector3());
 
-  return { lineMeshes, handPalmGeometry, handPalmMesh, points };
+  return { lineMeshes, palmGeometry, palmMesh, points };
 }
 
-// 両手分のメッシュとデータを保持する配列
-const hands = [createHandMeshes(), createHandMeshes()];
+// 両手分のオブジェクトを用意
+const hands = [createHandObjects(), createHandObjects()];
 
 
 // =======================
@@ -160,20 +162,29 @@ const handLandmarker = await HandLandmarker.createFromOptions(
       modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
     },
     runningMode: "VIDEO",
-    numHands: 2 // ★ 両手対応
+    numHands: 2
   }
 );
 
 
 // =======================
-// シリンダー配置関数
+// 線（シリンダー）の位置・太さ・色を動的に更新する関数
 // =======================
 function updateCylinderLine(mesh, p1, p2) {
   const direction = new THREE.Vector3().subVectors(p2, p1);
   const length = direction.length();
+  
+  // 1. 位置と向きの計算
   mesh.position.copy(p1).add(direction.multiplyScalar(0.5));
-  mesh.scale.set(1, length, 1);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+  
+  // 2. CONFIGの太さ（半径）と長さをスケールにリアルタイム反映
+  // Cylinderのデフォルト半径は1なので、CONFIG.lineWidthをそのままスケールに渡せば太さが変わります
+  mesh.scale.set(CONFIG.lineWidth, length, CONFIG.lineWidth);
+  
+  // 3. CONFIGの色をリアルタイム反映
+  mesh.material.color.setHex(CONFIG.lineColor);
+  
   mesh.visible = true;
 }
 
@@ -192,20 +203,18 @@ async function render() {
 
       const results = handLandmarker.detectForVideo(video, performance.now());
 
-      // 両手の全てのメッシュを一旦非表示に
+      // 一旦すべての手を非表示にする
       hands.forEach(hand => {
         hand.lineMeshes.forEach(m => m.visible = false);
-        hand.handPalmMesh.visible = false;
+        hand.palmMesh.visible = false;
       });
 
-      // 検知された手に対してループ
+      // 検知した手をループ処理
       results.landmarks.forEach((landmarks, handIndex) => {
-        // numHands=2でも片手しか検知されない場合があるため、存在する手だけ処理
         if (handIndex < hands.length) {
-          const handData = hands[handIndex];
-          const { lineMeshes, handPalmGeometry, handPalmMesh, points } = handData;
+          const { lineMeshes, palmGeometry, palmMesh, points } = hands[handIndex];
 
-          // 1. 座標変換
+          // ① 21マスの座標を取得・変換
           for (let i = 0; i < landmarks.length; i++) {
             const p = landmarks[i];
             points[i].set(
@@ -215,25 +224,29 @@ async function render() {
             );
           }
 
-          // 2. 線（シリンダー）の更新
+          // ② 骨格線の更新（太さと色もここで毎フレームCONFIGから読み込みます）
           connections.forEach((conn, connIndex) => {
             updateCylinderLine(lineMeshes[connIndex], points[conn[0]], points[conn[1]]);
           });
 
-          // 3. 面（塗りつぶし）の更新
+          // ③ 手のひら塗りつぶし面の更新（CONFIGの色と透明度をリアルタイム反映）
+          palmMesh.material.color.setHex(CONFIG.fillColor);
+          palmMesh.material.opacity = CONFIG.fillOpacity;
+
+          // 画像のイメージ通り「手首(0) と 各指の付け根(1, 5, 9, 13, 17)」を結ぶ面を作る
           const palmVertices = new Float32Array([
-            points[0].x,  points[0].y,  points[0].z,
-            points[2].x,  points[2].y,  points[2].z,
-            points[5].x,  points[5].y,  points[5].z,
-            points[9].x,  points[9].y,  points[9].z,
-            points[13].x, points[13].y, points[13].z,
-            points[17].x, points[17].y, points[17].z
+            points[0].x,  points[0].y,  points[0].z,  // 0: 手首
+            points[1].x,  points[1].y,  points[1].z,  // 1: 親指の付け根（一番手首側）
+            points[5].x,  points[5].y,  points[5].z,  // 5: 人差し指の付け根
+            points[9].x,  points[9].y,  points[9].z,  // 9: 中指の付け根
+            points[13].x, points[13].y, points[13].z, // 13: 薬指の付け根
+            points[17].x, points[17].y, points[17].z  // 17: 小指の付け根
           ]);
           
-          handPalmGeometry.setAttribute('position', new THREE.BufferAttribute(palmVertices, 3));
-          handPalmGeometry.computeVertexNormals();
-          handPalmGeometry.attributes.position.needsUpdate = true;
-          handPalmMesh.visible = true;
+          palmGeometry.setAttribute('position', new THREE.BufferAttribute(palmVertices, 3));
+          palmGeometry.computeVertexNormals();
+          palmGeometry.attributes.position.needsUpdate = true;
+          palmMesh.visible = true;
         }
       });
     }
